@@ -1,0 +1,20 @@
+# 独立于上层 Windowshit workspace（GUI 依赖不参与 CLI 工具集的 workspace）
+[workspace]
+
+[package]
+name = "runbox"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Linux 上的 Win+R：按下快捷键弹出运行框，以启动身份执行命令"
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.9" }
+adw = { package = "libadwaita", version = "0.7" }
+shlex = "1"
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = "0.14"
+ashpd = { version = "0.13", features = ["global_shortcuts"] }

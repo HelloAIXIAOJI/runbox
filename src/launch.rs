@@ -1,0 +1,62 @@
+//! 命令执行层。
+//!
+//! 设计定稿（与用户确认）：
+//! - 不用 shell，直接 `Command::spawn`；
+//! - 子进程继承 runbox 的启动身份与环境（`sudo runbox` = root 执行，普通启动 = 当前用户）；
+//! - 不做 Windows→Linux 命令映射，输入什么执行什么；
+//! - 失败时给出 Windows 风味的报错。
+
+use std::process::{Command, Stdio};
+
+/// 界面语言是否为中文（跟随 LANG 环境变量）。
+pub fn is_zh() -> bool {
+    std::env::var("LANG")
+        .unwrap_or_default()
+        .to_lowercase()
+        .starts_with("zh")
+}
+
+/// 解析并执行一条命令行。
+///
+/// 成功返回 `Ok(())`，失败返回面向用户的错误信息（可直接弹对话框）。
+pub fn run(cmdline: &str) -> Result<(), String> {
+    // shlex 只做 POSIX 风格分词（引号处理），不做任何变量展开 / 管道 / 重定向
+    let argv = match shlex::split(cmdline) {
+        Some(v) if !v.is_empty() => v,
+        _ => {
+            return Err(if is_zh() {
+                "命令不能为空。".to_string()
+            } else {
+                "The command cannot be empty.".to_string()
+            })
+        }
+    };
+
+    let mut cmd = Command::new(&argv[0]);
+    cmd.args(&argv[1..]);
+    // GUI 启动的程序不需要挂着终端 stdin
+    cmd.stdin(Stdio::null());
+    // 关键：这里不设置 user/group/env，子进程完整继承 runbox 的启动身份与环境。
+
+    match cmd.spawn() {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if is_zh() {
+                Err(format!(
+                    "'{}' 不是内部或外部命令，也不是可运行的程序或批处理文件。",
+                    argv[0]
+                ))
+            } else {
+                Err(format!(
+                    "'{0}' is not recognized as an internal or external command,\noperable program or batch file.",
+                    argv[0]
+                ))
+            }
+        }
+        Err(e) => Err(if is_zh() {
+            format!("无法启动 '{}'：{e}", argv[0])
+        } else {
+            format!("Failed to start '{}': {e}", argv[0])
+        }),
+    }
+}
