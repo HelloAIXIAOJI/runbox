@@ -5,14 +5,6 @@
 一个 Linux 原生的"运行"对话框：按下 `Super+R` 弹出，输入命令回车执行。
 用 **Rust + GTK4 + libadwaita** 编写，外观自动跟随系统主题（Adwaita）。
 
-## 特性
-
-- **以启动身份执行**：`sudo runbox` 启动 → 以 root 执行命令；普通启动 → 以当前用户执行。子进程完整继承 runbox 的身份与环境（不切用户、不丢图形会话）。
-- **全局热键**：X11 下 `XGrabKey` 直接注册 `Super+R`；Wayland 下走 XDG Desktop Portal 的 `GlobalShortcuts`，需在系统设置中为 runbox 授权绑定快捷键。
-- **运行历史**：`~/.config/runbox/history`，去重 + 上限 30 条。root 与普通用户的 HOME 不同，历史天然按身份分开。
-- **Windows 风味报错**：找不到命令时弹 `'xxx' 不是内部或外部命令……`，味儿很正。
-- **中英双语**：跟随 `LANG` 环境变量。
-
 ## 依赖（编译）
 
 Debian / Ubuntu：
