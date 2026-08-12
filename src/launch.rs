@@ -6,6 +6,7 @@
 //! - 不做 Windows→Linux 命令映射，输入什么执行什么；
 //! - 失败时给出 Windows 风味的报错。
 
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// 界面语言是否为中文（跟随 LANG 环境变量）。
@@ -39,6 +40,48 @@ fn open_with_xdg(target: &str) -> Result<(), String> {
     }
 }
 
+/// 系统里已安装的 shell 名集合。
+///
+/// 读取 `/etc/shells`（Linux 记录可用 shell 的标准文件）并取每个路径的
+/// basename。不硬编码列表：新安装的 shell 只要注册进 `/etc/shells` 就自动生效。
+fn known_shells() -> std::collections::HashSet<String> {
+    let mut set = std::collections::HashSet::new();
+    if let Ok(content) = std::fs::read_to_string("/etc/shells") {
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some(name) = Path::new(line).file_name() {
+                set.insert(name.to_string_lossy().into_owned());
+            }
+        }
+    }
+    set
+}
+
+/// 在默认终端模拟器中运行指定 shell。
+///
+/// 只走 `x-terminal-emulator`（Debian/Ubuntu 的 alternatives 统一入口，
+/// 由系统指向用户设置的默认终端），不做终端列表探测。多数终端用 `-e`。
+fn open_in_terminal(shell: &str) -> Result<(), String> {
+    let mut cmd = Command::new("x-terminal-emulator");
+    cmd.arg("-e").arg(shell);
+    match cmd.spawn() {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(if is_zh() {
+            "需要 x-terminal-emulator 来打开终端，但系统中没有找到该程序。".to_string()
+        } else {
+            "x-terminal-emulator is required to open a terminal, but it was not found.".to_string()
+        }),
+        Err(e) => Err(if is_zh() {
+            format!("启动终端失败：{e}")
+        } else {
+            format!("Failed to start terminal: {e}")
+        }),
+    }
+}
+
 /// 取用户主目录。优先 `HOME`，取不到时退回 `/`。
 fn home_dir() -> std::path::PathBuf {
     std::env::var_os("HOME")
@@ -47,19 +90,27 @@ fn home_dir() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("/"))
 }
 
-/// 若输入指向一个**存在的目录**，返回其绝对化路径；否则返回 `None`。
+/// 若输入指向一个**存在的目录或文件**，返回其绝对化路径；否则返回 `None`。
+///
+/// 只有"看起来像路径"的输入才当作待打开目标：绝对路径、含 `/` 的路径、
+/// 或 `.`/`..`。纯命令名（不含路径特征）返回 `None`，走命令层，避免把
+/// `vim` 这类命令名误判成路径去打开。
 ///
 /// 相对路径以 `$HOME` 为基准解析，与命令执行的固定 CWD 保持一致
-/// （这样 `.` = $HOME，`..` = $HOME 的上一级）。绝对路径直接判断。
-/// 只认目录，文件/普通命令不在此列，避免把命令名误判成路径。
-fn resolve_existing_dir(input: &str) -> Option<std::path::PathBuf> {
-    let p = std::path::Path::new(input);
+/// （这样 `.` = $HOME，`..` = $HOME 的上一级）。
+fn resolve_existing_target(input: &str) -> Option<std::path::PathBuf> {
+    let p = Path::new(input);
+    let looks_like_path =
+        p.is_absolute() || input.contains('/') || input == "." || input == "..";
+    if !looks_like_path {
+        return None;
+    }
     let full = if p.is_absolute() {
         p.to_path_buf()
     } else {
         home_dir().join(p)
     };
-    if full.is_dir() {
+    if full.exists() {
         Some(full)
     } else {
         None
@@ -76,11 +127,12 @@ pub fn run(cmdline: &str) -> Result<(), String> {
         return open_with_xdg(trimmed);
     }
 
-    // 2. 输入指向一个存在的目录（如 `.`、`..`、`/path`）→ 用文件管理器打开。
-    //    这就是 Windows 运行框里"输入 . 打开当前目录"的对应行为：
-    //    Windows 走 ShellExecute，Linux 用 xdg-open 交给桌面文件管理器。
-    //    非目录（文件路径/普通命令）不在这里拦截，直接交给命令层执行。
-    if let Some(path) = resolve_existing_dir(trimmed) {
+    // 2. 输入指向一个存在的目录或文件（如 `.`、`..`、`/path`、`x.txt`）→
+    //    用系统默认应用打开。这就是 Windows 运行框里"输入 . 打开当前目录"
+    //    的对应行为：Windows 走 ShellExecute，Linux 用 xdg-open 分发——
+    //    目录交给文件管理器，.txt/.html/.docx 等文件交给各自的默认软件。
+    //    纯命令名（不含路径特征）不被拦截，直接交给命令层执行。
+    if let Some(path) = resolve_existing_target(trimmed) {
         return open_with_xdg(&path.to_string_lossy());
     }
 
@@ -96,6 +148,19 @@ pub fn run(cmdline: &str) -> Result<(), String> {
             })
         }
     };
+
+    // 4. 裸的 shell 名（如 bash / zsh / fish，不带参数）→ 打开终端窗口承载它。
+    //    shell 集合不硬编码，而是读系统 /etc/shells 自动发现：
+    //    新装的 shell 只要注册进去就自动生效，无需更新代码。
+    if argv.len() == 1 {
+        let name = Path::new(&argv[0])
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| argv[0].clone());
+        if known_shells().contains(&name) {
+            return open_in_terminal(&name);
+        }
+    }
 
     let mut cmd = Command::new(&argv[0]);
     cmd.args(&argv[1..]);
