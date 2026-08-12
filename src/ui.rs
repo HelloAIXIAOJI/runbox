@@ -91,12 +91,6 @@ pub fn build(
     dropdown.set_popover(Some(&popover));
     dropdown.set_tooltip_text(Some(if launch::is_zh() { "历史" } else { "History" }));
 
-    // 下拉框每次弹出时刷新历史列表，保证最新、且不被之前的过滤残留影响
-    let history_list_for_pop = history_list.clone();
-    popover.connect_show(move |_| {
-        refresh_history_list(&history_list_for_pop);
-    });
-
     let entry_box = Box::new(Orientation::Horizontal, 0);
     entry_box.append(&entry);
     entry_box.append(&dropdown);
@@ -285,6 +279,17 @@ fn refresh_history_list(list: &ListBox) {
 }
 
 fn append_history_row(list: &ListBox, text: &str) {
+    // 第二层防御（第一层在 history::load 的清洗）：
+    // 跳过空白行、含控制字符、或超长的异常行，避免单条脏数据影响整体列表。
+    if text.trim().is_empty() {
+        return;
+    }
+    if text.chars().any(|c| c.is_control()) {
+        return;
+    }
+    if text.chars().count() > 512 {
+        return;
+    }
     let row = ListBoxRow::new();
     let label = Label::new(Some(text));
     label.set_xalign(0.0);
