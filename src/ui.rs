@@ -197,8 +197,10 @@ pub fn build(
         });
     }
 
-    // 历史遍历状态：当前指向历史列表的哪个位置（None = 初始/未选中）
+    // 历史遍历状态：当前指向历史列表的哪个位置（None = 未开始遍历 / 已回到原始输入）
     let history_index: Rc<RefCell<Option<usize>>> = Rc::new(RefCell::new(None));
+    // 保存"开始遍历前"输入框里已有的内容，遍历回到起点时恢复它（避免丢失用户输入）
+    let history_draft: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
 
     // 键盘事件（Capture 阶段统一接管）：
     // - ↑/↓ 遍历历史记录并填入输入框（不用下拉框）
@@ -212,6 +214,7 @@ pub fn build(
         let entry = entry.clone();
         let on_run = on_run.clone();
         let history_index = history_index.clone();
+        let history_draft = history_draft.clone();
         key.connect_key_pressed(move |_, keyval, _, state| {
             let Some(window) = window.upgrade() else {
                 return glib::Propagation::Stop;
@@ -229,24 +232,46 @@ pub fn build(
                     // 在历史记录中循环遍历。
                     // load() 返回旧→新，最新在最后（索引 len-1）。
                     // ↑：从最新开始，逐条往更旧走；↓：反向。
+                    // history_index 为 None 表示"未开始遍历 / 已回到原始输入"，
+                    // 此时若用户输入过内容，先保存为 draft，遍历回起点时恢复它。
                     let hist = history::load();
                     if hist.is_empty() {
                         return glib::Propagation::Stop;
                     }
                     let len = hist.len();
                     let mut idx = *history_index.borrow();
-                    idx = Some(match keyval {
+
+                    // 第一次进入遍历：把当前输入框内容存为 draft，便于回退恢复
+                    if idx.is_none() {
+                        *history_draft.borrow_mut() = Some(entry.text().to_string());
+                    }
+
+                    // 计算下一索引（None 表示回到"原始输入"）
+                    let next = match keyval {
                         gdk::Key::Up => match idx {
-                            None => len - 1, // 第一次按 ↑ 显示最新一条
-                            Some(i) => (i + len - 1) % len,
+                            None => Some(len - 1), // 第一次按 ↑ 显示最新一条
+                            Some(0) => None,       // 已到最旧，再按 ↑ 回到原始输入
+                            Some(i) => Some(i - 1),
                         },
                         _ => match idx {
-                            None => 0, // 第一次按 ↓ 显示最旧一条
-                            Some(i) => (i + 1) % len,
+                            None => Some(0), // 第一次按 ↓ 显示最旧一条
+                            Some(i) if i + 1 >= len => None, // 已到最新，再按 ↓ 回到原始输入
+                            Some(i) => Some(i + 1),
                         },
-                    });
-                    *history_index.borrow_mut() = idx;
-                    entry.set_text(&hist[idx.unwrap()]);
+                    };
+
+                    match next {
+                        Some(i) => {
+                            *history_index.borrow_mut() = Some(i);
+                            entry.set_text(&hist[i]);
+                        }
+                        None => {
+                            // 回到原始输入：恢复用户最初输入的内容（或清空）
+                            *history_index.borrow_mut() = None;
+                            let draft = history_draft.borrow().clone().unwrap_or_default();
+                            entry.set_text(&draft);
+                        }
+                    }
                     glib::Propagation::Stop
                 }
                 gdk::Key::Return | gdk::Key::KP_Enter => {
