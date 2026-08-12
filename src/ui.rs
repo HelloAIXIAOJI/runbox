@@ -8,6 +8,7 @@
 //! 这样能保留原生标题栏 + 关闭/最小化/最大化按钮，
 //! 比 AdwWindow 的 client-side decoration 更贴近 Windows 原版。
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk::gdk;
@@ -205,9 +206,12 @@ pub fn build(
         }
     });
 
+    // 历史遍历状态：当前指向历史列表的哪个位置（None = 初始/未选中）
+    let history_index: Rc<RefCell<Option<usize>>> = Rc::new(RefCell::new(None));
+
     // 键盘事件（Capture 阶段统一接管）：
+    // - ↑/↓ 遍历历史记录并填入输入框（不用下拉框）
     // - Esc 关闭（popover 打开时优先关 popover）
-    // - ↓ 打开历史 popover
     // - 回车执行；Ctrl+Shift+回车以 root（pkexec）执行
     let key = EventControllerKey::new();
     key.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -217,6 +221,7 @@ pub fn build(
         let history_list = history_list.clone();
         let entry = entry.clone();
         let on_run = on_run.clone();
+        let history_index = history_index.clone();
         key.connect_key_pressed(move |_, keyval, _, state| {
             let Some(window) = window.upgrade() else {
                 return glib::Propagation::Stop;
@@ -230,9 +235,28 @@ pub fn build(
                     }
                     glib::Propagation::Stop
                 }
-                gdk::Key::Down if !popover.is_visible() => {
-                    refresh_history_list(&history_list);
-                    popover.popup();
+                gdk::Key::Up | gdk::Key::Down => {
+                    // 在历史记录中循环遍历。
+                    // load() 返回旧→新，最新在最后（索引 len-1）。
+                    // ↑：从最新开始，逐条往更旧走；↓：反向。
+                    let hist = history::load();
+                    if hist.is_empty() {
+                        return glib::Propagation::Stop;
+                    }
+                    let len = hist.len();
+                    let mut idx = *history_index.borrow();
+                    idx = Some(match keyval {
+                        gdk::Key::Up => match idx {
+                            None => len - 1, // 第一次按 ↑ 显示最新一条
+                            Some(i) => (i + len - 1) % len,
+                        },
+                        _ => match idx {
+                            None => 0, // 第一次按 ↓ 显示最旧一条
+                            Some(i) => (i + 1) % len,
+                        },
+                    });
+                    *history_index.borrow_mut() = idx;
+                    entry.set_text(&hist[idx.unwrap()]);
                     glib::Propagation::Stop
                 }
                 gdk::Key::Return | gdk::Key::KP_Enter => {

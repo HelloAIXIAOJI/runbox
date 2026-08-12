@@ -253,7 +253,13 @@ pub fn run_as_root(cmdline: &str) -> Result<(), String> {
 
     let mut cmd = Command::new("pkexec");
     cmd.arg("/usr/bin/env");
-    for k in ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "XAUTHORITY"] {
+    for k in [
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "XDG_RUNTIME_DIR",
+        "XAUTHORITY",
+        "DBUS_SESSION_BUS_ADDRESS",
+    ] {
         if let Ok(v) = std::env::var(k) {
             if !v.is_empty() {
                 cmd.arg(format!("{k}={v}"));
