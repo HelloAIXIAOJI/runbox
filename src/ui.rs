@@ -215,11 +215,26 @@ pub fn build(
         let on_run = on_run.clone();
         let history_index = history_index.clone();
         let history_draft = history_draft.clone();
+        let btn_browse = btn_browse.clone();
         key.connect_key_pressed(move |_, keyval, _, state| {
             let Some(window) = window.upgrade() else {
                 return glib::Propagation::Stop;
             };
             match keyval {
+                // Alt+O：聚焦"打开"输入框（mnemonic，对应 打开(O):）
+                gdk::Key::o | gdk::Key::O
+                    if state.contains(gdk::ModifierType::ALT_MASK) =>
+                {
+                    entry.grab_focus();
+                    glib::Propagation::Stop
+                }
+                // Alt+B：触发"浏览(B)..."（复用浏览按钮的点击逻辑）
+                gdk::Key::b | gdk::Key::B
+                    if state.contains(gdk::ModifierType::ALT_MASK) =>
+                {
+                    btn_browse.emit_clicked();
+                    glib::Propagation::Stop
+                }
                 gdk::Key::Escape => {
                     if popover.is_visible() {
                         popover.popdown();
