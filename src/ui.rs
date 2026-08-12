@@ -165,7 +165,8 @@ pub fn build(
                     if let Some(file) = dialog.file() {
                         if let Some(path) = file.path() {
                             if let Some(entry) = entry.upgrade() {
-                                entry.set_text(&path.to_string_lossy());
+                                // 用引号包裹，防止空格/引号在回车时被 shlex 拆开
+                                entry.set_text(&quote_for_shlex(&path.to_string_lossy()));
                             }
                         }
                     }
@@ -281,6 +282,19 @@ fn append_history_row(list: &ListBox, text: &str) {
     label.set_margin_bottom(4);
     row.set_child(Some(&label));
     list.append(&row);
+}
+
+/// 把路径转义为 shlex 可安全解析的形式。
+///
+/// 浏览选中的路径若含空格/引号，直接填入后回车时会被 `shlex::split`
+/// 拆成多个参数。这里用单引号包裹（内部单引号转义），保证整个路径
+/// 作为一个整体传回命令层。
+fn quote_for_shlex(path: &str) -> String {
+    if path.chars().any(|c| c.is_whitespace() || c == '\'' || c == '"') {
+        format!("'{}'", path.replace('\'', "'\\''"))
+    } else {
+        path.to_string()
+    }
 }
 
 fn row_text(row: &ListBoxRow) -> String {
