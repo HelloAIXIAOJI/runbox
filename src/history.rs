@@ -77,3 +77,8 @@ pub fn record(cmdline: &str) {
     }
     let _ = fs::write(path, items.join("\n") + "\n");
 }
+
+/// 清空全部历史记录。
+pub fn clear() {
+    let _ = fs::write(history_path(), "");
+}

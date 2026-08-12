@@ -15,8 +15,8 @@ use gtk::gdk;
 use gtk::prelude::*;
 use gtk::{
     glib, Align, ApplicationWindow, Box, Button, EventControllerKey, FileChooserAction,
-    FileChooserNative, Image, Label, ListBox, ListBoxRow, MessageDialog, Orientation,
-    Popover, PositionType, ResponseType, SearchEntry, SelectionMode,
+    FileChooserNative, GestureClick, Image, Label, ListBox, ListBoxRow, MessageDialog,
+    Orientation, Popover, PositionType, ResponseType, SearchEntry, SelectionMode,
 };
 
 use crate::history;
@@ -289,6 +289,119 @@ pub fn build(
         });
     }
     entry.add_controller(key);
+
+    // ── 图标右键：快捷菜单 ──────────────────────────────────
+    // 右键图标弹出上下文菜单：以 root 运行、以 root 重新打开自身、清空历史、关闭。
+    // root 执行与 Ctrl+Shift+Enter 同一条路径（on_run 第 3 参为 true）。
+    {
+        let ctx_menu = Box::new(Orientation::Vertical, 0);
+        ctx_menu.set_margin_top(4);
+        ctx_menu.set_margin_bottom(4);
+        ctx_menu.set_margin_start(4);
+        ctx_menu.set_margin_end(4);
+
+        // 单个菜单项：左侧主文字 + 右侧快捷键提示（可有可无）
+        let mk_item = |text: &str, shortcut: &str| -> Button {
+            let btn = Button::new();
+            btn.set_has_frame(false);
+            btn.set_halign(Align::Fill);
+            let row = Box::new(Orientation::Horizontal, 12);
+            let label = Label::new(Some(text));
+            label.set_xalign(0.0);
+            label.set_hexpand(true);
+            row.append(&label);
+            if !shortcut.is_empty() {
+                let sc = Label::new(Some(shortcut));
+                sc.set_xalign(1.0);
+                sc.add_css_class("dim-label");
+                row.append(&sc);
+            }
+            btn.set_child(Some(&row));
+            btn
+        };
+
+        let item_root = mk_item(
+            if launch::is_zh() { "以root身份运行" } else { "Run as root" },
+            "Ctrl+Shift+Enter",
+        );
+        let item_reopen = mk_item(
+            if launch::is_zh() { "以root身份重新打开运行" } else { "Reopen as root" },
+            "",
+        );
+        let item_clear = mk_item(
+            if launch::is_zh() { "清空历史记录" } else { "Clear history" },
+            "",
+        );
+        let item_close = mk_item(if launch::is_zh() { "关闭" } else { "Close" }, "");
+
+        ctx_menu.append(&item_root);
+        ctx_menu.append(&item_reopen);
+        ctx_menu.append(&item_clear);
+        ctx_menu.append(&item_close);
+
+        let ctx_popover = Popover::new();
+        ctx_popover.set_parent(&icon); // 定位坐标相对图标
+        ctx_popover.set_child(Some(&ctx_menu));
+
+        // 以 root 运行输入框内容（与 Ctrl+Shift+Enter 等价）
+        {
+            let window = window.downgrade();
+            let entry = entry.downgrade();
+            let on_run = on_run.clone();
+            item_root.connect_clicked(move |_| {
+                let (Some(window), Some(entry)) = (window.upgrade(), entry.upgrade()) else {
+                    return;
+                };
+                let text = entry.text().to_string();
+                if !text.trim().is_empty() {
+                    on_run(&window, &text, true);
+                }
+            });
+        }
+
+        // 以 root 重新打开自身：与第一项相同，仅把"打开目标"强制替换成 runbox 自己
+        {
+            let window = window.downgrade();
+            let on_run = on_run.clone();
+            item_reopen.connect_clicked(move |_| {
+                let Some(window) = window.upgrade() else { return; };
+                if let Ok(exe) = std::env::current_exe() {
+                    let path = exe.to_string_lossy().into_owned();
+                    on_run(&window, &path, true);
+                }
+            });
+        }
+
+        // 清空历史并刷新下拉列表
+        {
+            let history_list = history_list.clone();
+            item_clear.connect_clicked(move |_| {
+                history::clear();
+                refresh_history_list(&history_list);
+            });
+        }
+
+        // 关闭窗口
+        {
+            let window = window.downgrade();
+            item_close.connect_clicked(move |_| {
+                if let Some(window) = window.upgrade() {
+                    window.close();
+                }
+            });
+        }
+
+        // 右键（按钮 3）弹出菜单，定位到鼠标位置
+        let click = GestureClick::new();
+        click.set_button(3);
+        let ctx_popover_for_click = ctx_popover.clone();
+        click.connect_pressed(move |_, _, x, y| {
+            ctx_popover_for_click
+                .set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+            ctx_popover_for_click.popup();
+        });
+        icon.add_controller(click);
+    }
 
     window
 }
