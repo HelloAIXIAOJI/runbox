@@ -16,6 +16,14 @@ pub fn is_zh() -> bool {
         .starts_with("zh")
 }
 
+/// 取用户主目录。优先 `HOME`，取不到时退回 `/`。
+fn home_dir() -> std::path::PathBuf {
+    std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::PathBuf::from("/"))
+}
+
 /// 解析并执行一条命令行。
 ///
 /// 成功返回 `Ok(())`，失败返回面向用户的错误信息（可直接弹对话框）。
@@ -34,6 +42,9 @@ pub fn run(cmdline: &str) -> Result<(), String> {
 
     let mut cmd = Command::new(&argv[0]);
     cmd.args(&argv[1..]);
+    // 固定当前工作目录为用户主目录，保证无论从哪里启动 runbox，
+    // 执行的命令都在 $HOME 下运行（贴近桌面启动的直觉）。
+    cmd.current_dir(home_dir());
     // GUI 启动的程序不需要挂着终端 stdin
     cmd.stdin(Stdio::null());
     // 关键：这里不设置 user/group/env，子进程完整继承 runbox 的启动身份与环境。
