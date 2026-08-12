@@ -218,7 +218,6 @@ pub fn build(
     {
         let window = window.downgrade();
         let popover = popover.clone();
-        let history_list = history_list.clone();
         let entry = entry.clone();
         let on_run = on_run.clone();
         let history_index = history_index.clone();
