@@ -50,9 +50,10 @@ pub fn build(
 
     let explain = Label::new(Some(
         if launch::is_zh() {
-            "Linux 将根据你所输入的名称，为你打开相应的\n程序。"
+            "Linux 将根据你所输入的名称，为你打开相应的\n
+            程序、文件夹、文档或 Internet 资源。"
         } else {
-            "Type the name of a program and Linux will open it."
+            "Type the name of a program, folder, document, or Internet resource you want to open, and Linux will open it."
         }
     ));
     explain.set_wrap(true);
