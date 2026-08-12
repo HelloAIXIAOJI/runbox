@@ -16,6 +16,29 @@ pub fn is_zh() -> bool {
         .starts_with("zh")
 }
 
+/// 用系统默认应用打开 URL 或路径（走 `xdg-open`，Linux 的标准打开机制）。
+///
+/// `xdg-open` 会按系统默认应用分发：http/https 交给浏览器，目录交给
+/// 文件管理器（nautilus/dolphin 等），文件交给对应默认程序。
+/// 命令不存在或启动失败时给出面向用户的错误。
+fn open_with_xdg(target: &str) -> Result<(), String> {
+    let mut cmd = Command::new("xdg-open");
+    cmd.arg(target);
+    match cmd.spawn() {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(if is_zh() {
+            "需要 xdg-open 来打开目标，但系统中没有找到该程序。".to_string()
+        } else {
+            "xdg-open is required to open the target, but it was not found.".to_string()
+        }),
+        Err(e) => Err(if is_zh() {
+            format!("无法打开目标：{e}")
+        } else {
+            format!("Failed to open the target: {e}")
+        }),
+    }
+}
+
 /// 取用户主目录。优先 `HOME`，取不到时退回 `/`。
 fn home_dir() -> std::path::PathBuf {
     std::env::var_os("HOME")
@@ -24,10 +47,44 @@ fn home_dir() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("/"))
 }
 
+/// 若输入指向一个**存在的目录**，返回其绝对化路径；否则返回 `None`。
+///
+/// 相对路径以 `$HOME` 为基准解析，与命令执行的固定 CWD 保持一致
+/// （这样 `.` = $HOME，`..` = $HOME 的上一级）。绝对路径直接判断。
+/// 只认目录，文件/普通命令不在此列，避免把命令名误判成路径。
+fn resolve_existing_dir(input: &str) -> Option<std::path::PathBuf> {
+    let p = std::path::Path::new(input);
+    let full = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        home_dir().join(p)
+    };
+    if full.is_dir() {
+        Some(full)
+    } else {
+        None
+    }
+}
+
 /// 解析并执行一条命令行。
 ///
 /// 成功返回 `Ok(())`，失败返回面向用户的错误信息（可直接弹对话框）。
 pub fn run(cmdline: &str) -> Result<(), String> {
+    // 1. 以协议头开头（http:// / https://）→ 直接用默认浏览器打开
+    let trimmed = cmdline.trim();
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return open_with_xdg(trimmed);
+    }
+
+    // 2. 输入指向一个存在的目录（如 `.`、`..`、`/path`）→ 用文件管理器打开。
+    //    这就是 Windows 运行框里"输入 . 打开当前目录"的对应行为：
+    //    Windows 走 ShellExecute，Linux 用 xdg-open 交给桌面文件管理器。
+    //    非目录（文件路径/普通命令）不在这里拦截，直接交给命令层执行。
+    if let Some(path) = resolve_existing_dir(trimmed) {
+        return open_with_xdg(&path.to_string_lossy());
+    }
+
+    // 3. 其余按命令解析执行。
     // shlex 只做 POSIX 风格分词（引号处理），不做任何变量展开 / 管道 / 重定向
     let argv = match shlex::split(cmdline) {
         Some(v) if !v.is_empty() => v,
