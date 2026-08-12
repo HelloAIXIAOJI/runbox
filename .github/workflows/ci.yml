@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build & test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # runbox 是 Linux-only 的 GTK4/libadwaita GUI，需要系统库才能编译。
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev
+      - name: Build release
+        run: cargo build --release --locked
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: runbox-linux-x86_64
+          path: target/release/runbox
+          if-no-files-found: error

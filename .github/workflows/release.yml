@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  release:
+    types: [created]
+
+env:
+  CARGO_TERM_COLOR: always
+  # softprops/action-gh-release@v2 仍基于 Node 20；临时兼容以避免弃用报错
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
+
+jobs:
+  build:
+    name: Build & attach (${{ matrix.artifact }})
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64-unknown-linux-gnu
+            artifact: linux-x86_64
+            build: cargo
+          - os: ubuntu-latest
+            arch: aarch64-unknown-linux-gnu
+            artifact: linux-aarch64
+            build: zigbuild
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-18
+          targets: ${{ matrix.arch }}
+
+      - name: Install zig
+        if: matrix.build == 'zigbuild'
+        uses: goto-bus-stop/setup-zig@v2
+
+      - name: Install cargo-zigbuild
+        if: matrix.build == 'zigbuild'
+        run: cargo install cargo-zigbuild --locked
+
+      # runbox 是 Linux-only 的 GTK4/libadwaita GUI，需要系统库才能编译。
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary (cargo)
+        if: matrix.build == 'cargo'
+        run: cargo build --release
+        env:
+          CARGO_BUILD_TARGET: ${{ matrix.arch }}
+
+      - name: Build release binary (zigbuild)
+        if: matrix.build == 'zigbuild'
+        run: cargo zigbuild --release --target ${{ matrix.arch }}
+
+      - name: Package binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          src="target/${{ matrix.arch }}/release/runbox"
+          cp "$src" "dist/runbox"
+          cd dist
+          tar -czf "../runbox-${{ matrix.artifact }}.tar.gz" runbox
+          cd ..
+          ls -la
+
+      - name: Upload binary to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: runbox-${{ matrix.artifact }}.tar.gz
+          generate_release_notes: false
