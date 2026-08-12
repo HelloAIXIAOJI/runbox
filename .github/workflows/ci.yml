@@ -22,7 +22,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-4-dev libadwaita-1-dev
       - name: Build release
-        run: cargo build --release --locked
+        # 不传 --locked：Cargo.lock 未入库，CI 上自动生成后再编译。
+        run: cargo build --release
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
