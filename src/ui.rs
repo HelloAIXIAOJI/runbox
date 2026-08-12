@@ -203,15 +203,6 @@ pub fn build(
         });
     }
 
-    // 输入变化 → 过滤历史
-    let history_list_weak = history_list.downgrade();
-    entry.connect_search_changed(move |e| {
-        let q = e.text().to_lowercase();
-        if let Some(list) = history_list_weak.upgrade() {
-            refresh_history_list_filtered(&list, &q);
-        }
-    });
-
     // 历史遍历状态：当前指向历史列表的哪个位置（None = 初始/未选中）
     let history_index: Rc<RefCell<Option<usize>>> = Rc::new(RefCell::new(None));
 
@@ -290,18 +281,6 @@ fn refresh_history_list(list: &ListBox) {
     }
     for line in history::load() {
         append_history_row(list, &line);
-    }
-}
-
-/// 按过滤词筛选历史。
-fn refresh_history_list_filtered(list: &ListBox, filter: &str) {
-    while let Some(child) = list.first_child() {
-        list.remove(&child);
-    }
-    for line in history::load() {
-        if filter.is_empty() || line.to_lowercase().contains(filter) {
-            append_history_row(list, &line);
-        }
     }
 }
 
