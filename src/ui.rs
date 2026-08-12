@@ -36,6 +36,17 @@ pub fn build(
         .deletable(true)        // 顶栏 X 按钮可关
         .build();
 
+    // 初始定位：窗口映射（显示）到显示器时，把窗口挪到该显示器的左下角。
+    // 需要映射后才能拿到 monitor，故在 map 信号里做。
+    window.connect_map(|win| {
+        if let Some(monitor) = win.monitor() {
+            let geo = monitor.geometry();
+            // 左下角：x = 屏幕左边缘 + 小边距，y = 底部(顶+高) - 窗口高 - 小边距
+            let (w, h) = win.default_size();
+            win.move(geo.x() + 8, geo.y() + geo.height() - h - 40);
+        }
+    });
+
     // ── 顶部：图标 + 说明文字 ─────────────────────────────
     // 图标：用 theme fallback 链（同名有 symbolic 优先），保证各 Linux 桌面都有
     let icon = Image::from_icon_name("applications-system");
