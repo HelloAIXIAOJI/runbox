@@ -38,7 +38,18 @@ fn main() -> glib::ExitCode {
                     match result {
                         Ok(_) => {
                             history::record(cmdline);
-                            window.close();
+                            if as_root {
+                                // root 场景下不立即关窗：pkexec 的认证框通常
+                                // transient 到本窗口，runbox 一关会把认证框一起
+                                // 带走（表现为"弹窗一闪就消失"）。延后关闭，
+                                // 给认证框完整的展示与交互时间。
+                                gtk::glib::timeout_add_local_once(
+                                    std::time::Duration::from_millis(3000),
+                                    move || window.close(),
+                                );
+                            } else {
+                                window.close();
+                            }
                         }
                         Err(e) => ui::show_error(window, &e),
                     }

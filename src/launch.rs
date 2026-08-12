@@ -117,6 +117,41 @@ fn resolve_existing_target(input: &str) -> Option<std::path::PathBuf> {
     }
 }
 
+/// 判断路径是否指向一个可执行文件（普通文件且带执行权限）。
+#[cfg(unix)]
+fn is_executable_file(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    match std::fs::metadata(path) {
+        Ok(m) if m.is_file() => (m.permissions().mode() & 0o111) != 0,
+        _ => false,
+    }
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(_: &std::path::Path) -> bool {
+    false
+}
+
+/// 直接执行一个可执行文件（如 `./runbox`、`/path/to/program`）。
+fn execute_file(path: &std::path::Path) -> Result<(), String> {
+    let mut cmd = Command::new(path);
+    cmd.current_dir(home_dir());
+    cmd.stdin(Stdio::null());
+    match cmd.spawn() {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Err(if is_zh() {
+            format!("'{}' 没有执行权限。", path.to_string_lossy())
+        } else {
+            format!("'{}' is not executable.", path.to_string_lossy())
+        }),
+        Err(e) => Err(if is_zh() {
+            format!("无法启动 '{}'：{e}", path.to_string_lossy())
+        } else {
+            format!("Failed to start '{}': {e}", path.to_string_lossy())
+        }),
+    }
+}
+
 /// 解析并执行一条命令行。
 ///
 /// 成功返回 `Ok(())`，失败返回面向用户的错误信息（可直接弹对话框）。
@@ -127,12 +162,14 @@ pub fn run(cmdline: &str) -> Result<(), String> {
         return open_with_xdg(trimmed);
     }
 
-    // 2. 输入指向一个存在的目录或文件（如 `.`、`..`、`/path`、`x.txt`）→
-    //    用系统默认应用打开。这就是 Windows 运行框里"输入 . 打开当前目录"
-    //    的对应行为：Windows 走 ShellExecute，Linux 用 xdg-open 分发——
-    //    目录交给文件管理器，.txt/.html/.docx 等文件交给各自的默认软件。
+    // 2. 输入指向一个存在的路径（如 `.`、`..`、`/path`、`x.txt`、`./runbox`）→
+    //    按类型分发：可执行文件直接执行；目录/普通文件用默认应用打开。
+    //    （目录→文件管理器，.txt/.html/.docx→各自默认软件）
     //    纯命令名（不含路径特征）不被拦截，直接交给命令层执行。
     if let Some(path) = resolve_existing_target(trimmed) {
+        if is_executable_file(&path) {
+            return execute_file(&path);
+        }
         return open_with_xdg(&path.to_string_lossy());
     }
 
@@ -226,17 +263,51 @@ pub fn run_as_root(cmdline: &str) -> Result<(), String> {
     cmd.args(&argv);
     cmd.stdin(Stdio::null());
 
-    match cmd.spawn() {
-        Ok(_) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(if is_zh() {
-            "以 root 身份运行需要 polkit（pkexec），但系统中没有找到该程序。".to_string()
-        } else {
-            "polkit (pkexec) is required to run as root, but it was not found.".to_string()
-        }),
-        Err(e) => Err(if is_zh() {
-            format!("以 root 身份启动失败：{e}")
-        } else {
-            format!("Failed to start as root: {e}")
-        }),
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(if is_zh() {
+                "以 root 身份运行需要 polkit（pkexec），但系统中没有找到该程序。".to_string()
+            } else {
+                "polkit (pkexec) is required to run as root, but it was not found.".to_string()
+            })
+        }
+        Err(e) => {
+            return Err(if is_zh() {
+                format!("以 root 身份启动失败：{e}")
+            } else {
+                format!("Failed to start as root: {e}")
+            })
+        }
+    };
+
+    // pkexec 会等待认证；认证失败/被拒时通常很快退出并返回非零。
+    // 这里用非阻塞轮询一小段：若立即失败则报错，若认证成功进入运行则放行。
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if !status.success() => {
+                return Err(if is_zh() {
+                    "以 root 身份运行被取消或认证失败（请确认系统已安装并启用 polkit 认证代理）。".to_string()
+                } else {
+                    "Running as root was cancelled or authentication failed (make sure a polkit authentication agent is installed).".to_string()
+                })
+            }
+            Ok(Some(_)) => return Ok(()), // 成功退出
+            Ok(None) => {
+                // 仍在运行：可能是认证框等待中，或目标程序已启动
+                if std::time::Instant::now() >= deadline {
+                    return Ok(());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => {
+                return Err(if is_zh() {
+                    format!("等待 root 认证结果失败：{e}")
+                } else {
+                    format!("Failed to wait for root authentication: {e}")
+                })
+            }
+        }
     }
 }
