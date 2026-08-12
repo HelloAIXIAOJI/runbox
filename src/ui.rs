@@ -91,6 +91,12 @@ pub fn build(
     dropdown.set_popover(Some(&popover));
     dropdown.set_tooltip_text(Some(if launch::is_zh() { "历史" } else { "History" }));
 
+    // 下拉框每次弹出时刷新历史列表，保证最新、且不被之前的过滤残留影响
+    let history_list_for_pop = history_list.clone();
+    popover.connect_show(move |_| {
+        refresh_history_list(&history_list_for_pop);
+    });
+
     let entry_box = Box::new(Orientation::Horizontal, 0);
     entry_box.append(&entry);
     entry_box.append(&dropdown);
