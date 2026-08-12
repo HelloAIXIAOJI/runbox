@@ -43,9 +43,10 @@ fn main() -> glib::ExitCode {
                                 // transient 到本窗口，runbox 一关会把认证框一起
                                 // 带走（表现为"弹窗一闪就消失"）。延后关闭，
                                 // 给认证框完整的展示与交互时间。
+                                let w = window.clone();
                                 gtk::glib::timeout_add_local_once(
                                     std::time::Duration::from_millis(3000),
-                                    move || window.close(),
+                                    move || w.close(),
                                 );
                             } else {
                                 window.close();
