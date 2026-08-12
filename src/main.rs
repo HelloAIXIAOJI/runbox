@@ -1,6 +1,7 @@
 mod history;
 mod hotkey;
 mod launch;
+mod repl;
 mod ui;
 
 use std::cell::RefCell;
@@ -11,6 +12,12 @@ use gtk::prelude::*;
 use gtk::{glib, Application};
 
 fn main() -> glib::ExitCode {
+    // REPL 模式：无 GUI，直接命令行交互，处理完即退出。
+    // 放在 GTK 初始化之前，避免无显示环境下创建 Application 失败。
+    if std::env::args().any(|a| a == "--repl") {
+        return repl::run().into();
+    }
+
     let app = Application::builder()
         .application_id("org.windowshit.runbox")
         .build();
