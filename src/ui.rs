@@ -24,7 +24,7 @@ use crate::launch;
 /// 构建运行框窗口。
 pub fn build(
     app: &gtk::Application,
-    on_run: Rc<dyn Fn(&ApplicationWindow, &str)>,
+    on_run: Rc<dyn Fn(&ApplicationWindow, &str, bool)>,
 ) -> ApplicationWindow {
     let window = ApplicationWindow::builder()
         .application(app)
@@ -131,7 +131,7 @@ pub fn build(
             };
             let text = entry.text().to_string();
             if !text.trim().is_empty() {
-                on_run(&window, &text);
+                on_run(&window, &text, false);
             }
         });
     }
@@ -176,22 +176,6 @@ pub fn build(
         });
     }
 
-    // 回车执行（与确定按钮等价）
-    {
-        let window = window.downgrade();
-        let entry_weak = entry.downgrade();
-        let on_run = on_run.clone();
-        entry.connect_activate(move |_| {
-            let (Some(window), Some(entry)) = (window.upgrade(), entry_weak.upgrade()) else {
-                return;
-            };
-            let text = entry.text().to_string();
-            if !text.trim().is_empty() {
-                on_run(&window, &text);
-            }
-        });
-    }
-
     // 历史行点击 → 填入并关闭 popover
     {
         let entry = entry.downgrade();
@@ -216,14 +200,19 @@ pub fn build(
         }
     });
 
-    // Esc 关闭（popover 打开时优先关 popover），↓ 打开历史 popover
+    // 键盘事件（Capture 阶段统一接管）：
+    // - Esc 关闭（popover 打开时优先关 popover）
+    // - ↓ 打开历史 popover
+    // - 回车执行；Ctrl+Shift+回车以 root（pkexec）执行
     let key = EventControllerKey::new();
     key.set_propagation_phase(gtk::PropagationPhase::Capture);
     {
         let window = window.downgrade();
         let popover = popover.clone();
         let history_list = history_list.clone();
-        key.connect_key_pressed(move |_, keyval, _, _| {
+        let entry = entry.clone();
+        let on_run = on_run.clone();
+        key.connect_key_pressed(move |_, keyval, _, state| {
             let Some(window) = window.upgrade() else {
                 return glib::Propagation::Stop;
             };
@@ -239,6 +228,16 @@ pub fn build(
                 gdk::Key::Down if !popover.is_visible() => {
                     refresh_history_list(&history_list);
                     popover.popup();
+                    glib::Propagation::Stop
+                }
+                gdk::Key::Return | gdk::Key::KP_Enter => {
+                    let text = entry.text().to_string();
+                    if text.trim().is_empty() {
+                        return glib::Propagation::Stop;
+                    }
+                    let as_root = state.contains(gdk::ModifierType::CONTROL_MASK)
+                        && state.contains(gdk::ModifierType::SHIFT_MASK);
+                    on_run(&window, &text, as_root);
                     glib::Propagation::Stop
                 }
                 _ => glib::Propagation::Proceed,

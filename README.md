@@ -5,6 +5,9 @@
 一个 Linux 原生的"运行"对话框：按下 `Super+R` 弹出，输入命令回车执行。
 用 **Rust + GTK4 + libadwaita** 编写，外观自动跟随系统主题（Adwaita）。
 
+按 **Ctrl+Shift+回车** 会以 **root 身份**运行当前命令：走 polkit（`pkexec`），
+桌面环境的认证代理会弹出系统密码框，每次授权，无需额外配置。
+
 ## 依赖（编译）
 
 Debian / Ubuntu：

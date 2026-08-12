@@ -27,15 +27,22 @@ fn main() -> glib::ExitCode {
             }
 
             // 执行逻辑：spawn → 成功记历史并关闭窗口，失败弹 Windows 风味报错
-            let on_run: Rc<dyn Fn(&gtk::ApplicationWindow, &str)> = Rc::new(|window, cmdline| {
-                match launch::run(cmdline) {
-                    Ok(_) => {
-                        history::record(cmdline);
-                        window.close();
+            // as_root 为 true 时（Ctrl+Shift+Enter）走 pkexec 以 root 身份运行。
+            let on_run: Rc<dyn Fn(&gtk::ApplicationWindow, &str, bool)> =
+                Rc::new(|window, cmdline, as_root| {
+                    let result = if as_root {
+                        launch::run_as_root(cmdline)
+                    } else {
+                        launch::run(cmdline)
+                    };
+                    match result {
+                        Ok(_) => {
+                            history::record(cmdline);
+                            window.close();
+                        }
+                        Err(e) => ui::show_error(window, &e),
                     }
-                    Err(e) => ui::show_error(window, &e),
-                }
-            });
+                });
 
             let window = ui::build(app, on_run);
 

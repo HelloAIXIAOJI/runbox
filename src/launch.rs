@@ -60,3 +60,50 @@ pub fn run(cmdline: &str) -> Result<(), String> {
         }),
     }
 }
+
+/// 解析并以 root 身份执行一条命令行。
+///
+/// 走 polkit 的 `pkexec`：桌面环境的 polkit 认证代理会弹出一个
+/// 系统密码框（正是 GNOME/KDE 里"临时以 root 运行"的原生体验），
+/// 每次运行都需要授权，安全且无需额外配置。
+///
+/// `pkexec` 会重置环境变量，这里用 `/usr/bin/env` 把图形环境变量
+/// 带进 root 会话，否则 root 启动的 GUI 程序连不上 X/Wayland 显示。
+pub fn run_as_root(cmdline: &str) -> Result<(), String> {
+    let argv = match shlex::split(cmdline) {
+        Some(v) if !v.is_empty() => v,
+        _ => {
+            return Err(if is_zh() {
+                "命令不能为空。".to_string()
+            } else {
+                "The command cannot be empty.".to_string()
+            })
+        }
+    };
+
+    let mut cmd = Command::new("pkexec");
+    cmd.arg("/usr/bin/env");
+    for k in ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "XAUTHORITY"] {
+        if let Ok(v) = std::env::var(k) {
+            if !v.is_empty() {
+                cmd.arg(format!("{k}={v}"));
+            }
+        }
+    }
+    cmd.args(&argv);
+    cmd.stdin(Stdio::null());
+
+    match cmd.spawn() {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(if is_zh() {
+            "以 root 身份运行需要 polkit（pkexec），但系统中没有找到该程序。".to_string()
+        } else {
+            "polkit (pkexec) is required to run as root, but it was not found.".to_string()
+        }),
+        Err(e) => Err(if is_zh() {
+            format!("以 root 身份启动失败：{e}")
+        } else {
+            format!("Failed to start as root: {e}")
+        }),
+    }
+}
