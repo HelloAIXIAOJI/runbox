@@ -17,4 +17,5 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = "0.14"
+gdk4-x11 = "0.9"
 ashpd = { version = "0.13", features = ["global_shortcuts"] }

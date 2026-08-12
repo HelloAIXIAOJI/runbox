@@ -36,16 +36,9 @@ pub fn build(
         .deletable(true)        // 顶栏 X 按钮可关
         .build();
 
-    // 初始定位：窗口映射（显示）到显示器时，把窗口挪到该显示器的左下角。
-    // 需要映射后才能拿到 monitor，故在 map 信号里做。
-    window.connect_map(|win| {
-        if let Some(monitor) = win.monitor() {
-            let geo = monitor.geometry();
-            // 左下角：x = 屏幕左边缘 + 小边距，y = 底部(顶+高) - 窗口高 - 小边距
-            let (w, h) = win.default_size();
-            win.move(geo.x() + 8, geo.y() + geo.height() - h - 40);
-        }
-    });
+    // 初始定位：窗口映射（显示）后，若处于 X11 会话，把窗口挪到屏幕左下角。
+    // 用 x11rb 直接移动（GTK4 不提供应用层绝对定位）；Wayland 下跳过。
+    window.connect_map(position_bottom_left_x11);
 
     // ── 顶部：图标 + 说明文字 ─────────────────────────────
     // 图标：用 theme fallback 链（同名有 symbolic 优先），保证各 Linux 桌面都有
@@ -306,6 +299,51 @@ fn quote_for_shlex(path: &str) -> String {
     } else {
         path.to_string()
     }
+}
+
+/// 把窗口移到当前屏幕的左下角（X11 only）。
+///
+/// GTK4 高层 API 不提供"把窗口放到绝对坐标"，这里用项目已依赖的 x11rb：
+/// 1. 通过 gdk4-x11 拿到窗口的 X11 XID；
+/// 2. 用 x11rb 读取屏幕尺寸，算出左下角坐标；
+/// 3. `configure_window` 移动窗口。
+///
+/// Wayland 会话直接返回（协议不允许应用自行绝对定位）。
+fn position_bottom_left_x11(win: &ApplicationWindow) {
+    // 仅处理 X11 会话，Wayland 跳过
+    let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some()
+        || std::env::var("XDG_SESSION_TYPE")
+            .map(|s| s == "wayland")
+            .unwrap_or(false);
+    if is_wayland {
+        return;
+    }
+
+    // 拿窗口的 X11 XID
+    use gdk4_x11::prelude::*;
+    let Some(surface) = win.surface() else { return };
+    let Some(x11_surface) = surface.downcast_ref::<gdk4_x11::X11Surface>() else {
+        return;
+    };
+    let xid = x11_surface.xid() as u32;
+
+    // 连接 X server，读屏幕尺寸并移动窗口
+    let (conn, screen_num) = match x11rb::connect(None) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let setup = conn.setup();
+    let root = &setup.roots[screen_num];
+    let screen_h = root.height_in_pixels as i32;
+    let (_, win_h) = win.default_size();
+
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{ConfigureWindowAux, ConnectionExt};
+    let mut aux = ConfigureWindowAux::default();
+    aux.x = Some(8);
+    aux.y = Some(screen_h - win_h - 40);
+    let _ = conn.configure_window(xid, &aux);
+    let _ = conn.flush();
 }
 
 fn row_text(row: &ListBoxRow) -> String {
