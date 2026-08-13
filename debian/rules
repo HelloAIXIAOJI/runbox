@@ -1,0 +1,15 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+export CARGO_TARGET_DIR=$(CURDIR)/target
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --release
+
+override_dh_auto_test:
+
+override_dh_auto_install:
+	install -Dm755 target/release/runbox debian/runbox/usr/bin/runbox

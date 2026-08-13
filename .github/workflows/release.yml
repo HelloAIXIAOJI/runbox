@@ -1,19 +1,18 @@
 name: Release
 
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - 'v*'
 
 env:
   CARGO_TERM_COLOR: always
-  # softprops/action-gh-release@v2 仍基于 Node 20；临时兼容以避免弃用报错
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
 
 jobs:
   build:
-    name: Build & attach (${{ matrix.artifact }})
+    name: Build ${{ matrix.artifact }}
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -26,7 +25,9 @@ jobs:
             arch: aarch64-unknown-linux-gnu
             artifact: linux-aarch64
             build: zigbuild
+
     runs-on: ${{ matrix.os }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,11 +46,12 @@ jobs:
         if: matrix.build == 'zigbuild'
         run: cargo install cargo-zigbuild --locked
 
-      # runbox 是 Linux-only 的 GTK4/libadwaita GUI，需要系统库才能编译。
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev
+          sudo apt-get install -y \
+            libgtk-4-dev \
+            libadwaita-1-dev
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -68,16 +70,112 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist
-          src="target/${{ matrix.arch }}/release/runbox"
-          cp "$src" "dist/runbox"
-          cd dist
-          tar -czf "../runbox-${{ matrix.artifact }}.tar.gz" runbox
-          cd ..
-          ls -la
 
-      - name: Upload binary to release
+          mkdir -p dist
+
+          src="target/${{ matrix.arch }}/release/runbox"
+          cp "$src" dist/runbox
+
+          tar -czf "runbox-${{ matrix.artifact }}.tar.gz" -C dist runbox
+
+          ls -lh "runbox-${{ matrix.artifact }}.tar.gz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: runbox-${{ matrix.artifact }}
+          path: runbox-${{ matrix.artifact }}.tar.gz
+
+
+  deb:
+    name: Build Debian package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            debhelper-compat \
+            dpkg-dev \
+            cargo \
+            pkg-config \
+            libgtk-4-dev \
+            libglib2.0-dev \
+            libgdk-pixbuf-2.0-dev \
+            libcairo2-dev \
+            libpango1.0-dev \
+            libgraphene-1.0-dev \
+            libadwaita-1-dev
+
+      - name: Build Debian package
+        run: |
+          set -euo pipefail
+
+          PATH=/usr/lib/rust-1.93/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            dpkg-buildpackage -us -uc
+
+      - name: Collect Debian package
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+          cp ../runbox_*.deb dist/
+
+          ls -lh dist/
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: runbox-deb
+          path: dist/*.deb
+
+
+  release:
+    name: Create draft release
+    needs:
+      - build
+      - deb
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download x86_64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: runbox-linux-x86_64
+          path: dist
+
+      - name: Download aarch64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: runbox-linux-aarch64
+          path: dist
+
+      - name: Download Debian package
+        uses: actions/download-artifact@v4
+        with:
+          name: runbox-deb
+          path: dist
+
+      - name: Show release files
+        run: |
+          find dist -maxdepth 2 -type f -print -exec ls -lh {} \;
+
+      - name: Create draft GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: runbox-${{ matrix.artifact }}.tar.gz
-          generate_release_notes: false
+          draft: true
+          generate_release_notes: true
+          files: |
+            dist/runbox-linux-x86_64.tar.gz
+            dist/runbox-linux-aarch64.tar.gz
+            dist/runbox_*.deb
