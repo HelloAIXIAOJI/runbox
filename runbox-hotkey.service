@@ -1,0 +1,9 @@
+[Unit]
+Description=Runbox global hotkey listener
+
+[Service]
+ExecStart=/usr/bin/runbox
+Restart=always
+
+[Install]
+WantedBy=default.target

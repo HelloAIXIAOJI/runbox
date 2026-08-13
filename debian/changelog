@@ -1,0 +1,6 @@
+runbox (1.0.0-1) unstable; urgency=medium
+
+  * Initial Debian packaging for runbox.
+  * Added systemd user service and desktop entry.
+
+ -- Oliver <oliver@liuxiaozhen.dev>  Thu, 13 Aug 2026 22:24:00 +0800
