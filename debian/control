@@ -2,7 +2,7 @@ Source: runbox
 Section: utils
 Priority: optional
 Maintainer: Oliver <oliver@liuxiaozhen.dev>
-Build-Depends: debhelper-compat (= 13), cargo, pkg-config, libgtk-4-dev, libglib2.0-dev, libgdk-pixbuf-2.0-dev, libcairo2-dev, libpango1.0-dev, libgraphene-1.0-dev
+Build-Depends: debhelper-compat (= 13), cargo, pkg-config, libgtk-4-dev, libadwaita-1-dev, libglib2.0-dev, libgdk-pixbuf-2.0-dev, libcairo2-dev, libpango1.0-dev, libgraphene-1.0-dev
 Standards-Version: 4.6.2
 Homepage: https://github.com/HelloAIXIAOJI/runbox
 
