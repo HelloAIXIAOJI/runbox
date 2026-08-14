@@ -13,6 +13,7 @@ jobs:
     name: Build ${{ matrix.artifact }}
     permissions:
       contents: read
+
     strategy:
       fail-fast: false
       matrix:
@@ -21,6 +22,7 @@ jobs:
             arch: x86_64-unknown-linux-gnu
             artifact: linux-x86_64
             build: cargo
+
           - os: ubuntu-latest
             arch: aarch64-unknown-linux-gnu
             artifact: linux-aarch64
@@ -33,9 +35,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-07-18
           targets: ${{ matrix.arch }}
 
       - name: Install zig
@@ -50,21 +51,41 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            pkg-config \
             libgtk-4-dev \
             libadwaita-1-dev
+
+      - name: Install ARM64 GTK/GLib dependencies
+        if: matrix.arch == 'aarch64-unknown-linux-gnu'
+        run: |
+          set -euo pipefail
+
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            libgtk-4-dev:arm64 \
+            libadwaita-1-dev:arm64 \
+            libglib2.0-dev:arm64 \
+            libgdk-pixbuf-2.0-dev:arm64 \
+            libcairo2-dev:arm64 \
+            libpango1.0-dev:arm64 \
+            libgraphene-1.0-dev:arm64
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
 
       - name: Build release binary (cargo)
         if: matrix.build == 'cargo'
-        run: cargo build --release
-        env:
-          CARGO_BUILD_TARGET: ${{ matrix.arch }}
+        run: cargo build --release --target ${{ matrix.arch }}
 
       - name: Build release binary (zigbuild)
         if: matrix.build == 'zigbuild'
         run: cargo zigbuild --release --target ${{ matrix.arch }}
+        env:
+          PKG_CONFIG_ALLOW_CROSS: '1'
+          PKG_CONFIG_LIBDIR: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          PKG_CONFIG_SYSROOT_DIR: /
 
       - name: Package binary
         shell: bash
@@ -97,6 +118,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -104,7 +128,6 @@ jobs:
             build-essential \
             debhelper-compat \
             dpkg-dev \
-            cargo \
             pkg-config \
             libgtk-4-dev \
             libglib2.0-dev \
@@ -114,12 +137,15 @@ jobs:
             libgraphene-1.0-dev \
             libadwaita-1-dev
 
+      - name: Show Rust toolchain
+        run: |
+          rustc --version
+          cargo --version
+
       - name: Build Debian package
         run: |
           set -euo pipefail
-
-          PATH=/usr/lib/rust-1.93/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            dpkg-buildpackage -us -uc
+          dpkg-buildpackage -us -uc
 
       - name: Collect Debian package
         run: |
