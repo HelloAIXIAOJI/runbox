@@ -3,7 +3,7 @@
 
 [package]
 name = "runbox"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 license = "MIT"
 description = "Linux 上的 Win+R：按下快捷键弹出运行框，以启动身份执行命令"
