@@ -11,20 +11,23 @@ env:
 jobs:
   build:
     name: Build ${{ matrix.artifact }}
+
     permissions:
       contents: read
+
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # x86_64
+          - os: ubuntu-24.04
             arch: x86_64-unknown-linux-gnu
             artifact: linux-x86_64
-            build: cargo
-          - os: ubuntu-latest
+
+          # ARM64
+          - os: ubuntu-24.04-arm
             arch: aarch64-unknown-linux-gnu
             artifact: linux-aarch64
-            build: zigbuild
 
     runs-on: ${{ matrix.os }}
 
@@ -33,38 +36,35 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-07-18
           targets: ${{ matrix.arch }}
-
-      - name: Install zig
-        if: matrix.build == 'zigbuild'
-        uses: goto-bus-stop/setup-zig@v2
-
-      - name: Install cargo-zigbuild
-        if: matrix.build == 'zigbuild'
-        run: cargo install cargo-zigbuild --locked
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            pkg-config \
             libgtk-4-dev \
             libadwaita-1-dev
+
+      - name: Verify build environment
+        run: |
+          uname -m
+          rustc --version
+          cargo --version
+          pkg-config --version
+          pkg-config --modversion gtk4
+          pkg-config --modversion libadwaita-1
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Build release binary (cargo)
-        if: matrix.build == 'cargo'
-        run: cargo build --release
-        env:
-          CARGO_BUILD_TARGET: ${{ matrix.arch }}
-
-      - name: Build release binary (zigbuild)
-        if: matrix.build == 'zigbuild'
-        run: cargo zigbuild --release --target ${{ matrix.arch }}
+      - name: Build release binary
+        run: |
+          cargo build \
+            --release \
+            --target "${{ matrix.arch }}"
 
       - name: Package binary
         shell: bash
@@ -74,11 +74,18 @@ jobs:
           mkdir -p dist
 
           src="target/${{ matrix.arch }}/release/runbox"
+
+          test -f "$src"
+
           cp "$src" dist/runbox
 
-          tar -czf "runbox-${{ matrix.artifact }}.tar.gz" -C dist runbox
+          tar -czf \
+            "runbox-${{ matrix.artifact }}.tar.gz" \
+            -C dist \
+            runbox
 
-          ls -lh "runbox-${{ matrix.artifact }}.tar.gz"
+          ls -lh \
+            "runbox-${{ matrix.artifact }}.tar.gz"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -89,7 +96,9 @@ jobs:
 
   deb:
     name: Build Debian package
-    runs-on: ubuntu-latest
+
+    runs-on: ubuntu-24.04
+
     permissions:
       contents: read
 
@@ -100,6 +109,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
             build-essential \
             debhelper-compat \
@@ -114,18 +124,35 @@ jobs:
             libgraphene-1.0-dev \
             libadwaita-1-dev
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify Rust toolchain
+        run: |
+          echo "PATH=$PATH"
+          echo "cargo=$(command -v cargo)"
+          echo "rustc=$(command -v rustc)"
+
+          cargo --version
+          rustc --version
+
+      - name: Check Debian build dependencies
+        run: |
+          dpkg-checkbuilddeps
+
       - name: Build Debian package
         run: |
           set -euo pipefail
 
-          PATH=/usr/lib/rust-1.93/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            dpkg-buildpackage -us -uc
+          dpkg-buildpackage -us -uc
 
       - name: Collect Debian package
+        shell: bash
         run: |
           set -euo pipefail
 
           mkdir -p dist
+
           cp ../runbox_*.deb dist/
 
           ls -lh dist/
@@ -139,11 +166,13 @@ jobs:
 
   release:
     name: Create draft release
+
     needs:
       - build
       - deb
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+
     permissions:
       contents: write
 
@@ -154,7 +183,7 @@ jobs:
           name: runbox-linux-x86_64
           path: dist
 
-      - name: Download aarch64 binary
+      - name: Download ARM64 binary
         uses: actions/download-artifact@v4
         with:
           name: runbox-linux-aarch64
@@ -168,7 +197,11 @@ jobs:
 
       - name: Show release files
         run: |
-          find dist -maxdepth 2 -type f -print -exec ls -lh {} \;
+          find dist \
+            -maxdepth 2 \
+            -type f \
+            -print \
+            -exec ls -lh {} \;
 
       - name: Create draft GitHub Release
         uses: softprops/action-gh-release@v2
