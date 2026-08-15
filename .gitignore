@@ -1,3 +1,4 @@
+/root
 /target
 # 项目在 Windows 上开发、Linux 虚拟机上编译，锁文件不跨平台通用，由 CI 自行生成
 Cargo.lock
